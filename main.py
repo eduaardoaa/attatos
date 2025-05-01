@@ -1,9 +1,6 @@
 import mysql.connector
 import streamlit as st
-from adm import paginaadm
-from atos import paginaatos
-from unit import paginaunit
-from residencia import paginaresidencia
+import importlib
 
 def conexaobanco():
     try:
@@ -26,7 +23,13 @@ def validacao(usr, passw):
 
     cursor = conn.cursor(dictionary=True)
 
-    query = "SELECT * FROM usuarios WHERE usuario = %s AND senha = %s"
+    # Consulta modificada para fazer JOIN com grupoempresa
+    query = """
+    SELECT u.*, g.codigo as grupo_codigo 
+    FROM usuarios u
+    LEFT JOIN grupoempresa g ON u.grupo_id = g.id
+    WHERE u.usuario = %s AND u.senha = %s
+    """
     cursor.execute(query, (usr, passw))
     user = cursor.fetchone()
 
@@ -39,7 +42,8 @@ def validacao(usr, passw):
             'id': user['id'],
             'nome': user['Nome'],
             'permissao': user['permissao'],
-            'nomegrupo': user.get('NomeGrupo', '')  # Adiciona NomeGrupo ao session_state
+            'grupo_id': user.get('grupo_id'),
+            'grupo_codigo': user.get('grupo_codigo', '')
         }
         st.success('Login feito com sucesso!')
 
@@ -47,17 +51,13 @@ def validacao(usr, passw):
             st.session_state.page = "adm"
             st.rerun()
         elif user['permissao'] == 'cliente':
-            # Verifica o NomeGrupo para redirecionar para a página correta
-            nome_grupo = user.get('NomeGrupo', '').lower()
-            if 'atos capital' in nome_grupo:
-                st.session_state.page = "atos"
-            elif 'residencia' in nome_grupo:
-                st.session_state.page = "residencia"
-            elif 'unit' in nome_grupo:
-                st.session_state.page = "unit"
+            # Agora usa o grupo_codigo em vez do codigo direto do usuário
+            if user.get('grupo_codigo'):
+                codigo_pagina = user['grupo_codigo'].replace('.py', '').lower().strip()
+                st.session_state.page = codigo_pagina
+                st.rerun()
             else:
-                st.session_state.page = "dashboard"  # Página padrão caso não encontre o grupo
-            st.rerun()
+                st.error('Usuário não está associado a nenhum grupo válido.')
         else:
             st.error('Permissão desconhecida. Não foi possível redirecionar.')
     else:
@@ -80,6 +80,16 @@ def arealogin():
     if botaoentrar:
         validacao(username, password)
 
+def carregar_pagina(nome_pagina):
+    try:
+        modulo = importlib.import_module(nome_pagina)
+        if hasattr(modulo, f'pagina{nome_pagina}'):
+            getattr(modulo, f'pagina{nome_pagina}')()
+        else:
+            st.error(f'Página {nome_pagina} não possui a função esperada')
+    except ImportError:
+        st.error(f'Módulo {nome_pagina} não encontrado')
+
 def main():
     if "authenticated" not in st.session_state:
         st.session_state.authenticated = False
@@ -89,14 +99,9 @@ def main():
     else:
         if "page" in st.session_state:
             if st.session_state.page == "adm":
-                paginaadm()
-
-            elif st.session_state.page == "atos":
-                paginaatos()
-            elif st.session_state.page == "residencia":
-                paginaresidencia()
-            elif st.session_state.page == "unit":
-                paginaunit()
+                carregar_pagina("adm")
+            else:
+                carregar_pagina(st.session_state.page)
 
 if __name__ == "__main__":
     main()
