@@ -1,4 +1,3 @@
-from collections import defaultdict
 from decimal import Decimal
 import numpy as np
 import streamlit as st
@@ -11,59 +10,54 @@ import consultaSQL
 lc.setlocale(lc.LC_ALL, 'pt_BR')
 
 def verificar_autenticacao():
-    """Verifica se o usuário está autenticado e pertence ao grupo correto"""
+    """Verifica se o usuário está autenticado (feito login)"""
     if not st.session_state.get('authenticated', False):
         st.error("Você precisa fazer login para acessar esta página!")
-        st.session_state.page = None
-        st.rerun()
-    
-    # Verifica se o usuário pertence ao grupo Atos Capital
-    user_info = st.session_state.get('user_info', {})
-    nome_grupo = user_info.get('nomegrupo', '').lower()
-    if 'atos capital' not in nome_grupo:
-        st.error("Você não tem permissão para acessar esta página!")
         st.session_state.page = None
         st.rerun()
 
 def paginaatos():
     verificar_autenticacao()
     
-    st.set_page_config(
-        page_title='Dashboard',
-        page_icon=':a:',
-        layout='wide'
-    )
+    # Configuração da página
+    st.set_page_config(page_title="Dashboard ATOS", page_icon="📊", layout="wide")
 
-    # Configuração do estilo
+    # Configuração da barra lateral
     st.markdown(
         """
         <style>
         [data-testid="stSidebar"] {
-            background-color: #800000;
+            background-color: #800000; 
         }
         </style>
         """,
         unsafe_allow_html=True,
     )
 
-    # Filtros na sidebar
+    # Botão Voltar para Administração (apenas para ADMs)
+    if 'user_info' in st.session_state and st.session_state.user_info['permissao'].lower() == 'adm':
+        if st.sidebar.button("⬅️ Voltar para Administração"):
+            st.session_state.page = 'adm'
+            st.rerun()
+            
+    # Filtros da aplicação
     st.sidebar.header("Filtros")
     filiais = consultaSQL.obter_nmfilial()
     filial_selecionada = st.sidebar.selectbox("Selecione a Filial", filiais)
-
+    
     meses = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", 
              "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"]
-    
+
     mes_referencia = st.sidebar.selectbox("Selecione o mês de referência", meses)
     mes_referencia = [mes_referencia]
-
-    # Cabeçalho com logo
+    
+    # Cabeçalho
     left_co, cent_co, last_co = st.columns(3)
     with cent_co:
         st.image('logoatos.png', width=500)
     st.write(f"# Relatório de venda da {filial_selecionada}")
 
-    # Obtenção dos dados
+    # Obtenção de dados
     total_vendas = consultaSQL.obter_vendas_ano_anterior(filial_selecionada)
     meta_mes = consultaSQL.obter_meta_mes(filial_selecionada)
     previsao = consultaSQL.obter_previsao_vendas(filial_selecionada)
@@ -111,10 +105,9 @@ def paginaatos():
                 tickformat=",." 
             )
         )
-
         return fig
 
-    @st.cache_data
+    @st.cache_data 
     def grafico_de_crescimento(percentual_crescimento_atual, percentual_crescimento_meta):
         percentual_crescimento_atual = float(percentual_crescimento_atual)
         percentual_crescimento_meta = float(percentual_crescimento_meta)
@@ -143,9 +136,9 @@ def paginaatos():
             height=500, 
             width=500
         )
-
+        
         return fig
-
+    
     @st.cache_data
     def grafico_linhas_por_filial(mes_referencia, filial_selecionada):
         vendas = consultaSQL.obter_vendas_por_mes_e_filial(mes_referencia, filial_selecionada)
@@ -199,100 +192,39 @@ def paginaatos():
 
         return fig
 
-    @st.cache_data
-    def acompanhamento_anual(filial_selecionada):
-        vendas = consultaSQL.obter_vendas_anual_e_filial(filial_selecionada)
-
-        if vendas:
-            datas = [v[1] for v in vendas]
-            valores = [float(v[0]) if isinstance(v[0], Decimal) else v[0] for v in vendas]
-        
-            df_vendas = pd.DataFrame({
-                "AnoMes": pd.to_datetime(datas, format="%Y-%m"),
-                "Valor": valores
-            })
-            
-            df_vendas = df_vendas.sort_values("AnoMes")
-
-            fig = go.Figure()
-
-            df_vendas["Valor_formatado"] = df_vendas["Valor"].apply(lambda y: lc.currency(y, grouping=True))
-
-            fig.add_trace(go.Scatter(
-                x=df_vendas["AnoMes"].dt.strftime('%m/%Y'),
-                y=df_vendas["Valor"],
-                mode='lines+markers',
-                name="Vendas",
-                hovertemplate='Mês %{x}<br>Valor: %{customdata}<extra></extra>',
-                customdata=df_vendas["Valor_formatado"]
-            ))
-
-            fig.update_layout(
-                title=f"📊 Vendas nos últimos 12 meses - {filial_selecionada}",
-                xaxis_title="Mês/Ano",
-                yaxis_title="Vendas (R$)",
-                template="plotly_white",
-                yaxis=dict(
-                    tickprefix="R$ ",
-                    separatethousands=True,
-                    tickformat=",."
-                )
-            )
-
-            return fig
-        else:
-            st.warning("Nenhuma venda encontrada para os últimos 12 meses.")
-
-    @st.cache_data
     def grafico_de_evolucao_vendas(vendas_mensais):
         df_vendas = pd.DataFrame(list(vendas_mensais.items()), columns=['Mês', 'Vendas'])
         df_vendas['Mês'] = pd.to_datetime(df_vendas['Mês'], format='%m/%Y')
-        fig = px.line(df_vendas, x='Mês', y='Vendas',
-                      title=f'Evolução das Vendas - Últimos 12 meses ({filial_selecionada})')
-        
+        df_vendas = df_vendas.sort_values("Mês")
+
+        fig = go.Figure()
+
+        df_vendas["Valor_formatado"] = df_vendas["Vendas"].apply(lambda y: lc.currency(y, grouping=True))
+
+        fig.add_trace(go.Scatter(
+            x=df_vendas["Mês"].dt.strftime('%m/%Y'),
+            y=df_vendas["Vendas"],
+            mode='lines+markers',
+            name="Vendas",
+            hovertemplate='Mês %{x}<br>Valor: %{customdata}<extra></extra>',
+            customdata=df_vendas["Valor_formatado"]
+        ))
+
         fig.update_layout(
             xaxis_title="Meses",
             yaxis_title="Valor das Vendas (R$)",
             font=dict(color="white", size=14),
             plot_bgcolor="rgba(0,0,0,0)",
             paper_bgcolor="rgba(0,0,0,0)",
-            yaxis_tickformat="R$ ,.2f"
+            yaxis_tickformat="R$ ,.2f",
+            template="plotly_white",
+            yaxis=dict(
+                tickprefix="R$ ",
+                separatethousands=True,
+                tickformat=",." 
+            )
         )
         return fig
-
-    # Exibição dos dados
-    col1, col2, col3 = st.columns(3)
-
-    with col1:
-        st.write(f"""#### Vendas 2024: \n 
-                 R$ {lc.currency(total_vendas, grouping=True, symbol=False)}
-                 """)
-    with col2:
-        st.write(f"""#### Acumulado 2024: \n
-                 R$ {lc.currency(acumulo_vendas_ano_anterior, grouping=True, symbol=False)}
-                 """)
-    with col3:
-        st.write(f"""#### Vendas do dia: ({data_venda_dia.strftime('%d/%m/%Y') if data_venda_dia else 'Sem data'})\n
-                 R$ {lc.currency(vendas_dia_anterior, grouping=True, symbol=False)} """)
-
-    # Gráfico de barras
-    exibindo_grafico_de_barras = grafico_de_barras(meta_mes, previsao, acumulo_meta_ano_anterior, acumulo_de_vendas)
-    st.plotly_chart(exibindo_grafico_de_barras, use_container_width=True)
-
-    st.divider()
-
-    # Gráfico de crescimento na sidebar
-    exibindo_grafico_de_crescimento = grafico_de_crescimento(percentual_crescimento_atual, percentual_crescimento_meta)
-    st.sidebar.plotly_chart(exibindo_grafico_de_crescimento)
-
-    # Gráfico de linhas por mês
-    exibindo_grafico_de_linhas_vendas_por_mes = grafico_linhas_por_filial(mes_referencia, filial_selecionada)
-    if exibindo_grafico_de_linhas_vendas_por_mes:
-        st.plotly_chart(exibindo_grafico_de_linhas_vendas_por_mes, use_container_width=True)
-
-    # Gráfico de evolução anual
-    exibindo_grafico_acompanhamanto_anual = grafico_de_evolucao_vendas(vendas_mensais)
-    st.plotly_chart(exibindo_grafico_acompanhamanto_anual, use_container_width=True)
 
     # Mapa das filiais
     coordenadas_filiais = {
@@ -318,8 +250,44 @@ def paginaatos():
     dados_vendas = pd.DataFrame({
         'filial': list(coordenadas_filiais.keys())
     })
+    
     dados_vendas['latitude'] = dados_vendas['filial'].map(lambda x: coordenadas_filiais[x]['latitude'])
     dados_vendas['longitude'] = dados_vendas['filial'].map(lambda x: coordenadas_filiais[x]['longitude'])
+
+    # Exibição dos dados
+    col1, col2, col3 = st.columns(3)
+
+    with col1:
+        st.write(f"""#### Vendas 2024: \n 
+                R$ {lc.currency(total_vendas, grouping=True, symbol=False)}
+                """)
+    with col2:
+        st.write(f"""#### Acumulado 2024: \n
+                R$ {lc.currency(acumulo_vendas_ano_anterior, grouping=True, symbol=False)}
+                """)
+    with col3:
+        st.write(f"""#### Vendas do dia: ({data_venda_dia.strftime('%d/%m/%Y') if data_venda_dia else 'Sem data'})\n
+                R$ {lc.currency(vendas_dia_anterior, grouping=True, symbol=False)} """)
+
+    exibindo_grafico_de_barras = grafico_de_barras(meta_mes, previsao, acumulo_meta_ano_anterior, acumulo_de_vendas)
+    st.plotly_chart(exibindo_grafico_de_barras, use_container_width=True)
+
+    st.divider()
+
+    exibindo_grafico_de_crescimento = grafico_de_crescimento(percentual_crescimento_atual, percentual_crescimento_meta)
+    st.sidebar.plotly_chart(exibindo_grafico_de_crescimento)
+    
+    # Botão de logout adicionado aqui
+    if st.sidebar.button("🚪 Sair"):
+        st.session_state.authenticated = False
+        st.session_state.page = None
+        st.rerun()
+
+    exibindo_grafico_de_linhas_vendas_por_mes = grafico_linhas_por_filial(mes_referencia, filial_selecionada)
+    st.write(exibindo_grafico_de_linhas_vendas_por_mes)
+
+    exibindo_grafico_acompanhamanto_anual = grafico_de_evolucao_vendas(vendas_mensais)
+    st.write(exibindo_grafico_acompanhamanto_anual)
 
     st.subheader("📍 Mapa das filiais")
     st.map(dados_vendas[['latitude', 'longitude']])
