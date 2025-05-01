@@ -12,24 +12,17 @@ def verificar_autenticacao():
 def paginaresidencia():
     verificar_autenticacao()
     
-    # Configuração da agina
-    st.set_page_config(page_title="Dashboard", page_icon="📊", layout="wide")
+    # Configuração da página
+    st.set_page_config(page_title="TESTEAARNAISNAND", page_icon="📊", layout="wide")
     
     # Barra lateral
     if 'user_info' in st.session_state:
-        st.sidebar.subheader("Informações do Usuário")
-        st.sidebar.write(f"👤 Nome: {st.session_state.user_info['nome']}")
-        st.sidebar.write(f"🔑 Permissão: {st.session_state.user_info['permissao']}")
+
+        # Adicionar botão Voltar apenas para administradores
+        if st.session_state.user_info['permissao'].lower() == 'adm':
+            if st.sidebar.button("⬅️ Voltar para Administração"):
+                st.session_state.page = 'adm'  # Assumindo que 'adm' é o nome do módulo/arquivo
+                st.rerun()
     
-    # Botão sair da conta
-    if st.sidebar.button("🚪 Sair"):
-        st.session_state.authenticated = False
-        st.session_state.page = None
-        st.rerun()
+
     
-    # Nome Principal Pagina
-    st.title("📊 RESIDENCIA")
-    
-    # Mensagem boas vindas com nome cadastrado na conta (TEMPORARIO)
-    if 'user_info' in st.session_state:
-        st.write(f"Bem-vindo, {st.session_state.user_info['nome']}!")
