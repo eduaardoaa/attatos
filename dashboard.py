@@ -6,23 +6,43 @@ import plotly.graph_objects as go
 import plotly.express as px
 import locale as lc
 import consultaSQL
+import sys
+from inspect import getmembers, isfunction
 
 lc.setlocale(lc.LC_ALL, 'pt_BR')
 
 def verificar_autenticacao():
-    """Verifica se o usuário está autenticado (feito login)"""
+    """Verifica se o usuário está autenticado"""
     if not st.session_state.get('authenticated', False):
         st.error("Você precisa fazer login para acessar esta página!")
         st.session_state.page = None
         st.rerun()
 
+def pagina_nao_encontrada():
+    """Página exibida quando não encontra a função correspondente"""
+    verificar_autenticacao()
+    st.error("🚨 Dashboard não configurado para este grupo")
+    st.write(f"Grupo: {st.session_state.get('dashboard_page', 'Não especificado').replace('pagina', '')}")
+    
+    if st.button("↩️ Voltar"):
+        st.session_state.page = None  
+        st.switch_page("main.py")  
+
+# ----------------------------------------------------------
+# PÁGINA ATOS
+# ----------------------------------------------------------
+
 def paginaatos():
     verificar_autenticacao()
     
     # Configuração da página
-    st.set_page_config(page_title="Dashboard ATOS", page_icon="📊", layout="wide")
-
-    # Configuração da barra lateral
+    st.set_page_config(
+        page_title='Dashboard',
+        page_icon=':a:',
+        layout='wide'
+    )
+    
+    # Barra lateral
     st.markdown(
         """
         <style>
@@ -34,23 +54,23 @@ def paginaatos():
         unsafe_allow_html=True,
     )
 
-    # Botão Voltar para Administração (apenas para ADMs)
-    if 'user_info' in st.session_state and st.session_state.user_info['permissao'].lower() == 'adm':
-        if st.sidebar.button("⬅️ Voltar para Administração"):
-            st.session_state.page = 'adm'
-            st.rerun()
-            
-    # Filtros da aplicação
+    # Filtros na sidebar
     st.sidebar.header("Filtros")
     filiais = consultaSQL.obter_nmfilial()
     filial_selecionada = st.sidebar.selectbox("Selecione a Filial", filiais)
-    
+
     meses = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", 
              "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"]
 
     mes_referencia = st.sidebar.selectbox("Selecione o mês de referência", meses)
     mes_referencia = [mes_referencia]
-    
+
+    # Adicionar botão Voltar apenas para administradores
+    if 'user_info' in st.session_state and st.session_state.user_info['permissao'].lower() == 'adm':
+        if st.sidebar.button("⬅️ Voltar para Administração"):
+            st.session_state.page = 'adm'
+            st.rerun()
+
     # Cabeçalho
     left_co, cent_co, last_co = st.columns(3)
     with cent_co:
@@ -71,10 +91,18 @@ def paginaatos():
 
     @st.cache_data
     def grafico_de_barras(meta_mes, previsao, acumulo_meta_ano_anterior, acumulo_de_vendas):
-        meta_mes = float(meta_mes)
-        previsao = float(previsao)
-        acumulo_meta_ano_anterior = float(acumulo_meta_ano_anterior)
-        acumulo_de_vendas = float(acumulo_de_vendas)
+        def safe_float(value):
+            if value is None:
+                return 0.0
+            try:
+                return float(value)
+            except (ValueError, TypeError):
+                return 0.0
+
+        meta_mes = safe_float(meta_mes)
+        previsao = safe_float(previsao)
+        acumulo_meta_ano_anterior = safe_float(acumulo_meta_ano_anterior)
+        acumulo_de_vendas = safe_float(acumulo_de_vendas)
 
         categorias = ["Meta do mês", "Previsão", "Acumulado meta", "Acumulado Vendas"]
         valores = [meta_mes, previsao, acumulo_meta_ano_anterior, acumulo_de_vendas]
@@ -97,21 +125,28 @@ def paginaatos():
             font=dict(color="white", size=14),
             plot_bgcolor="rgba(0,0,0,0)",
             paper_bgcolor="rgba(0,0,0,0)",
-            height=550, 
+            height=550,
             width=500,
             yaxis=dict(
                 tickprefix="R$ ",
-                separatethousands=True, 
-                tickformat=",." 
+                separatethousands=True,
+                tickformat=",."
             )
         )
         return fig
 
     @st.cache_data 
     def grafico_de_crescimento(percentual_crescimento_atual, percentual_crescimento_meta):
-        percentual_crescimento_atual = float(percentual_crescimento_atual)
-        percentual_crescimento_meta = float(percentual_crescimento_meta)
+        try:
+            percentual_crescimento_atual = float(percentual_crescimento_atual)
+        except (ValueError, TypeError):
+            percentual_crescimento_atual = 0.0
 
+        try:
+            percentual_crescimento_meta = float(percentual_crescimento_meta)
+        except (ValueError, TypeError):
+            percentual_crescimento_meta = 0.0
+            
         fig = go.Figure()
 
         categorias = ["Cresc. 2025", "Cresc. meta"]
@@ -127,7 +162,7 @@ def paginaatos():
         ))
 
         fig.update_layout(
-            title=f"% Crescimento",
+            title= f"% Crescimento",
             xaxis_title="",
             yaxis_title="Valor %",
             font=dict(color="white", size=14),
@@ -136,9 +171,17 @@ def paginaatos():
             height=500, 
             width=500
         )
-        
         return fig
-    
+
+    exibindo_grafico_de_crescimento = grafico_de_crescimento(percentual_crescimento_atual, percentual_crescimento_meta)
+    st.sidebar.plotly_chart(exibindo_grafico_de_crescimento)
+
+    # Botão sair da conta (agora abaixo dos gráficos)
+    if st.sidebar.button("🚪 Sair"):
+        st.session_state.authenticated = False
+        st.session_state.page = None
+        st.rerun()
+
     @st.cache_data
     def grafico_linhas_por_filial(mes_referencia, filial_selecionada):
         vendas = consultaSQL.obter_vendas_por_mes_e_filial(mes_referencia, filial_selecionada)
@@ -147,6 +190,7 @@ def paginaatos():
             st.warning("Nenhuma venda encontrada para os filtros selecionados.")
             return
 
+        # Extrai e organiza os dados
         valores = [float(v[0]) if isinstance(v[0], Decimal) else v[0] for v in vendas]
         datas = [v[1] for v in vendas]
         meses = [v[2] for v in vendas]
@@ -246,48 +290,167 @@ def paginaatos():
         'FILIAL SÃO LUÍS': {'latitude': -2.5307, 'longitude': -44.3068},
         'FILIAL SÃO PAULO': {'latitude': -23.5505, 'longitude': -46.6333},
     }
-    
     dados_vendas = pd.DataFrame({
-        'filial': list(coordenadas_filiais.keys())
+        'filial': ['FILIAL BELÉM', 'FILIAL BELO HORIZONTE', 'FILIAL BRASÍLIA', 'FILIAL CAMPINAS', 'FILIAL CURITIBA', 'FILIAL DUQUE DE CAXIAS', 'FILIAL FORTALEZA', 'FILIAL GOIÂNIA', 'FILIAL GUARULHOS', 'FILIAL MACEIÓ', 'FILIAL MANAUS', 'FILIAL RECIFE', 'FILIAL RIO DE JANEIRO', 'FILIAL SALVADOR', 'FILIAL SÃO GONÇALO', 'FILIAL SÃO LUÍS', 'FILIAL SÃO PAULO']
     })
-    
+    # Adiciona latitude e longitude ao DataFrame
     dados_vendas['latitude'] = dados_vendas['filial'].map(lambda x: coordenadas_filiais[x]['latitude'])
     dados_vendas['longitude'] = dados_vendas['filial'].map(lambda x: coordenadas_filiais[x]['longitude'])
 
-    # Exibição dos dados
+    # Exibição:
     col1, col2, col3 = st.columns(3)
 
     with col1:
-        st.write(f"""#### Vendas 2024: \n 
+       st.write(f"""#### Vendas 2024: \n 
                 R$ {lc.currency(total_vendas, grouping=True, symbol=False)}
                 """)
     with col2:
-        st.write(f"""#### Acumulado 2024: \n
+       st.write(f"""#### Acumulado 2024: \n
                 R$ {lc.currency(acumulo_vendas_ano_anterior, grouping=True, symbol=False)}
                 """)
     with col3:
-        st.write(f"""#### Vendas do dia: ({data_venda_dia.strftime('%d/%m/%Y') if data_venda_dia else 'Sem data'})\n
+       st.write(f"""#### Vendas do dia: ({data_venda_dia.strftime('%d/%m/%Y') if data_venda_dia else 'Sem data'})\n
                 R$ {lc.currency(vendas_dia_anterior, grouping=True, symbol=False)} """)
 
+       
     exibindo_grafico_de_barras = grafico_de_barras(meta_mes, previsao, acumulo_meta_ano_anterior, acumulo_de_vendas)
     st.plotly_chart(exibindo_grafico_de_barras, use_container_width=True)
 
     st.divider()
 
-    exibindo_grafico_de_crescimento = grafico_de_crescimento(percentual_crescimento_atual, percentual_crescimento_meta)
-    st.sidebar.plotly_chart(exibindo_grafico_de_crescimento)
-    
-    # Botão de logout adicionado aqui
-    if st.sidebar.button("🚪 Sair"):
-        st.session_state.authenticated = False
-        st.session_state.page = None
-        st.rerun()
-
-    exibindo_grafico_de_linhas_vendas_por_mes = grafico_linhas_por_filial(mes_referencia, filial_selecionada)
+    exibindo_grafico_de_linhas_vendas_por_mes = grafico_linhas_por_filial(mes_referencia,filial_selecionada)
     st.write(exibindo_grafico_de_linhas_vendas_por_mes)
 
     exibindo_grafico_acompanhamanto_anual = grafico_de_evolucao_vendas(vendas_mensais)
     st.write(exibindo_grafico_acompanhamanto_anual)
 
-    st.subheader("📍 Mapa das filiais")
-    st.map(dados_vendas[['latitude', 'longitude']])
+    # Simula valores de vendas para cada filial (você pode substituir pelos reais)
+    dados_vendas["vendas"] = dados_vendas["filial"].apply(
+        lambda f: max(float(consultaSQL.obter_acumulo_de_vendas(f) or 0), 1)
+    )
+
+    dados_vendas["vendas_formatado"] = dados_vendas["vendas"].apply(
+        lambda v: lc.format_string('%.2f', v, grouping=True).replace('.', 'X').replace(',', '.').replace('X', ',')
+    )
+
+    # Cores mais intensas conforme o valor da venda
+    fig_mapa = px.scatter_mapbox(
+        dados_vendas,
+        lat="latitude",
+        lon="longitude",
+        hover_name="filial",
+        hover_data={"vendas": ":,.2f"},
+        color="vendas",
+        size="vendas",
+        color_continuous_scale="Turbo",
+        size_max=30,
+        zoom=3,
+        height=600,
+    )
+
+    fig_mapa.update_layout(
+        mapbox_style="carto-darkmatter",  # alternativo: "open-street-map", "white-bg"
+        margin={"r":0, "t":0, "l":0, "b":0},
+        coloraxis_colorbar=dict(title="Vendas (R$)", tickprefix="R$ "),
+    )
+
+    st.subheader("📍 Mapa das filiais com Vendas Acumuladas")
+    st.plotly_chart(fig_mapa, use_container_width=True)
+
+
+
+# ----------------------------------------------------------
+# PÁGINA UNIT
+# ----------------------------------------------------------
+
+def paginaunit():
+    verificar_autenticacao()
+    
+    # Configuração da página
+    st.set_page_config(page_title="Dashboard", page_icon="📊", layout="wide")
+    
+    # Barra lateral
+    if 'user_info' in st.session_state:
+        st.sidebar.subheader("Informações do Usuário")
+        st.sidebar.write(f"👤 Nome: {st.session_state.user_info['nome']}")
+        st.sidebar.write(f"🔑 Permissão: {st.session_state.user_info['permissao']}")
+        
+        # Adicionar botão Voltar apenas para administradores
+        if st.session_state.user_info['permissao'].lower() == 'adm':
+            if st.sidebar.button("⬅️ Voltar para Administração"):
+                st.session_state.page = 'adm'
+                st.rerun()
+    
+    # Botão sair da conta
+    if st.sidebar.button("🚪 Sair"):
+        st.session_state.authenticated = False
+        st.session_state.page = None
+        st.rerun()
+    
+    # Nome Principal Pagina
+    st.title("📊 UNIT")
+    
+    # Mensagem boas vindas com nome cadastrado na conta
+    if 'user_info' in st.session_state:
+        st.write(f"Bem-vindo, {st.session_state.user_info['nome']}!")
+
+# ----------------------------------------------------------
+# PÁGINA RESIDENCIA
+# ----------------------------------------------------------
+
+def paginaresidencia():
+    verificar_autenticacao()
+    
+    # Configuração da página
+    st.set_page_config(page_title="Dashboard", page_icon="📊", layout="wide")
+    
+    # Barra lateral
+    if 'user_info' in st.session_state:
+        st.sidebar.subheader("Informações do Usuário")
+        st.sidebar.write(f"👤 Nome: {st.session_state.user_info['nome']}")
+        st.sidebar.write(f"🔑 Permissão: {st.session_state.user_info['permissao']}")
+        
+        # Adicionar botão Voltar apenas para administradores
+        if st.session_state.user_info['permissao'].lower() == 'adm':
+            if st.sidebar.button("⬅️ Voltar para Administração"):
+                st.session_state.page = 'adm'
+                st.rerun()
+    
+    # Botão sair da conta
+    if st.sidebar.button("🚪 Sair"):
+        st.session_state.authenticated = False
+        st.session_state.page = None
+        st.rerun()
+    
+    # Nome Principal Pagina
+    st.title("📊 Residencia")
+    
+    # Mensagem boas vindas com nome cadastrado na conta
+    if 'user_info' in st.session_state:
+        st.write(f"Bem-vindo, {st.session_state.user_info['nome']}!")
+
+# ----------------------------------------------------------
+# PÁGINA NOVA ADICIONAR....
+# ----------------------------------------------------------
+
+# ----------------------------------------------------------
+# SISTEMA DINÂMICO DE ROTEAMENTO
+# ----------------------------------------------------------
+
+def encontrar_paginas():
+    """Lista todas as funções pagina* disponíveis"""
+    return [name for name, func in getmembers(sys.modules[__name__]) 
+             if name.startswith('pagina') and isfunction(func)]
+
+def main():
+    # Pega o nome da página da session_state
+    nome_pagina = st.session_state.get('dashboard_page', 'pagina_nao_encontrada')
+    
+    # Verifica se a função existe
+    if nome_pagina in globals() and callable(globals()[nome_pagina]):
+        globals()[nome_pagina]()
+    else:
+        pagina_nao_encontrada()
+
+if __name__ == "__main__":
+    main()
