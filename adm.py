@@ -43,13 +43,19 @@ def puxarusuarios():
     conexao = conectarbanco()
     if conexao:
         cursor = conexao.cursor()
-        cursor.execute("SELECT id, `Nome`, usuario, senha, numero, permissao, NomeGrupo, codigo FROM usuarios ORDER BY id ASC")
+        cursor.execute("""
+            SELECT u.id, u.`Nome`, u.usuario, u.senha, u.numero, u.permissao, 
+                   u.grupo_id, g.NomeGrupo, g.codigo
+            FROM usuarios u
+            LEFT JOIN grupoempresa g ON u.grupo_id = g.id
+            ORDER BY u.id ASC
+        """)
         usuarios = cursor.fetchall()
         conexao.close()
         return usuarios
     return []
 
-def atualizacaousuarios(user_id, nome, usuario, senha, numero, permissao, nome_grupo, codigo_grupo):
+def atualizacaousuarios(user_id, nome, usuario, senha, numero, permissao, grupo_id):
     conexao = conectarbanco()
     if conexao:
         cursor = conexao.cursor()
@@ -69,8 +75,8 @@ def atualizacaousuarios(user_id, nome, usuario, senha, numero, permissao, nome_g
             return False
 
         cursor.execute(
-            "UPDATE usuarios SET `Nome` = %s, usuario = %s, senha = %s, numero = %s, permissao = %s, NomeGrupo = %s, codigo = %s WHERE id = %s",
-            (nome, usuario, senha, numero, permissao, nome_grupo if nome_grupo else None, codigo_grupo if codigo_grupo else None, user_id)
+            "UPDATE usuarios SET `Nome` = %s, usuario = %s, senha = %s, numero = %s, permissao = %s, grupo_id = %s WHERE id = %s",
+            (nome, usuario, senha, numero, permissao, grupo_id, user_id)
         )
         conexao.commit()
         conexao.close()
@@ -86,7 +92,7 @@ def excluirusuario(user_id):
         conexao.close()
         st.success("Usuário excluído com sucesso!")
 
-def novousuario(nome, usuario, senha, numero, permissao, nome_grupo, codigo_grupo):
+def novousuario(nome, usuario, senha, numero, permissao, grupo_id):
     conexao = conectarbanco()
     if conexao:
         cursor = conexao.cursor()
@@ -106,8 +112,8 @@ def novousuario(nome, usuario, senha, numero, permissao, nome_grupo, codigo_grup
             return False
 
         cursor.execute(
-            "INSERT INTO usuarios (`Nome`, usuario, senha, numero, permissao, NomeGrupo, codigo) VALUES (%s, %s, %s, %s, %s, %s, %s)",
-            (nome, usuario, senha, numero, permissao, nome_grupo if nome_grupo else None, codigo_grupo if codigo_grupo else None)
+            "INSERT INTO usuarios (`Nome`, usuario, senha, numero, permissao, grupo_id) VALUES (%s, %s, %s, %s, %s, %s)",
+            (nome, usuario, senha, numero, permissao, grupo_id)
         )
         conexao.commit()
         conexao.close()
@@ -140,11 +146,6 @@ def atualizargrupo(grupo_id, novo_nome, novo_codigo):
     if conexao:
         cursor = conexao.cursor()
 
-        # Primeiro, pegar o nome atual do grupo antes da atualização
-        cursor.execute("SELECT NomeGrupo FROM grupoempresa WHERE id = %s", (grupo_id,))
-        nome_atual = cursor.fetchone()[0]
-
-        # Verificar se o novo nome já existe em outro grupo
         cursor.execute("SELECT COUNT(*) FROM grupoempresa WHERE NomeGrupo = %s AND id != %s", (novo_nome, grupo_id))
         count_grupo = cursor.fetchone()[0]
 
@@ -152,52 +153,34 @@ def atualizargrupo(grupo_id, novo_nome, novo_codigo):
             st.error("Nome do grupo já está sendo utilizado por outro grupo.")
             return False
 
-        # Atualizar o grupo
         cursor.execute(
             "UPDATE grupoempresa SET NomeGrupo = %s, codigo = %s WHERE id = %s",
             (novo_nome, novo_codigo, grupo_id)
         )
-
-        # Atualizar todos os usuários que tinham esse grupo
-        cursor.execute(
-            "UPDATE usuarios SET NomeGrupo = %s, codigo = %s WHERE NomeGrupo = %s",
-            (novo_nome, novo_codigo, nome_atual)
-        )
-
         conexao.commit()
         conexao.close()
-        st.success("Grupo e usuários associados atualizados com sucesso!")
+        st.success("Grupo atualizado com sucesso!")
         return True
     return False
 
 def excluirgrupo(grupo_id):
     conexao = conectarbanco()
     if conexao:
-        cursor = conexao.cursor()
-        
-        # Primeiro, pegar o nome do grupo
-        cursor.execute("SELECT NomeGrupo FROM grupoempresa WHERE id = %s", (grupo_id,))
-        resultado = cursor.fetchone()
-        
-        if not resultado:
-            st.error("Grupo não encontrado.")
-            return False
+        try:
+            cursor = conexao.cursor()
             
-        nome_grupo = resultado[0]
-        
-        # Remover referências dos usuários
-        cursor.execute(
-            "UPDATE usuarios SET NomeGrupo = NULL, codigo = NULL WHERE NomeGrupo = %s",
-            (nome_grupo,)
-        )
-        
-        # Agora pode excluir o grupo
-        cursor.execute("DELETE FROM grupoempresa WHERE id = %s", (grupo_id,))
-        
-        conexao.commit()
-        conexao.close()
-        st.success("Grupo excluído e referências removidas dos usuários com sucesso!")
-        return True
+            cursor.execute("UPDATE usuarios SET grupo_id = NULL WHERE grupo_id = %s", (grupo_id,))
+            cursor.execute("DELETE FROM grupoempresa WHERE id = %s", (grupo_id,))
+            
+            conexao.commit()
+            st.success("Grupo excluído com sucesso! Usuários associados tiveram seu grupo definido como NULL.")
+            return True
+        except mysql.connector.Error as e:
+            conexao.rollback()
+            st.error(f"Erro ao excluir grupo: {e}")
+            return False
+        finally:
+            conexao.close()
     return False
 
 def formularionovousuario():
@@ -220,27 +203,21 @@ def formularionovousuario():
         
         if grupos:
             opcoes_grupo = ["Sem Grupo"] + [grupo[1] for grupo in grupos]
-            nome_grupo = st.radio("Grupo da Empresa", opcoes_grupo)
+            grupo_selecionado = st.selectbox("Grupo da Empresa", opcoes_grupo)
             
-            codigo_grupo = None
-            if nome_grupo != "Sem Grupo":
-                for grupo in grupos:
-                    if grupo[1] == nome_grupo:
-                        codigo_grupo = grupo[2]
-                        break
-            
-            nome_grupo = None if nome_grupo == "Sem Grupo" else nome_grupo
+            grupo_id = None
+            if grupo_selecionado != "Sem Grupo":
+                grupo_id = next(grupo[0] for grupo in grupos if grupo[1] == grupo_selecionado)
         else:
             st.warning("Nenhum grupo cadastrado no sistema")
-            nome_grupo = None
-            codigo_grupo = None
+            grupo_id = None
 
         submit_button = st.form_submit_button(label="Adicionar Usuário", use_container_width=True)
 
         if submit_button:
             if not all([nome, usuario, senha, numero]):
                 st.error("Todos os campos são obrigatórios!")
-            elif novousuario(nome, usuario, senha, numero, permissao, nome_grupo, codigo_grupo):
+            elif novousuario(nome, usuario, senha, numero, permissao, grupo_id):
                 st.session_state.mensagem = "Novo usuário cadastrado com sucesso!"
                 st.session_state.novousuario = False
                 st.rerun()
@@ -255,8 +232,7 @@ def formularioeditarusuario(user):
     st.subheader(f"Editar Usuário: {user[1]}")
 
     grupos = puxargrupos()
-    grupo_atual = user[6] if len(user) > 6 and user[6] else None
-    codigo_atual = user[7] if len(user) > 7 and user[7] else None
+    grupo_atual_id = user[6] if len(user) > 6 and user[6] else None
 
     with st.form(key=f"editarusuario{user[0]}"):
         nome = st.text_input("Nome", value=user[1], max_chars=50)
@@ -270,33 +246,31 @@ def formularioeditarusuario(user):
         if grupos:
             opcoes_grupo = ["Sem Grupo"] + [grupo[1] for grupo in grupos]
             
-            if grupo_atual:
-                index_grupo = opcoes_grupo.index(grupo_atual) if grupo_atual in opcoes_grupo else 0
-            else:
-                index_grupo = 0
+            grupo_atual_nome = None
+            if grupo_atual_id:
+                grupo_atual_nome = next((grupo[1] for grupo in grupos if grupo[0] == grupo_atual_id), None)
             
-            nome_grupo = st.radio("Grupo da Empresa", opcoes_grupo, 
-                                index=index_grupo)
+            index = opcoes_grupo.index(grupo_atual_nome) if grupo_atual_nome else 0
             
-            codigo_grupo = None
-            if nome_grupo != "Sem Grupo":
-                for grupo in grupos:
-                    if grupo[1] == nome_grupo:
-                        codigo_grupo = grupo[2]
-                        break
+            grupo_selecionado = st.selectbox(
+                "Grupo da Empresa",
+                opcoes_grupo,
+                index=index
+            )
             
-            nome_grupo = None if nome_grupo == "Sem Grupo" else nome_grupo
+            grupo_id = None
+            if grupo_selecionado != "Sem Grupo":
+                grupo_id = next(grupo[0] for grupo in grupos if grupo[1] == grupo_selecionado)
         else:
             st.warning("Nenhum grupo cadastrado no sistema")
-            nome_grupo = None
-            codigo_grupo = None
+            grupo_id = None
 
         submit_button = st.form_submit_button(label="Atualizar Usuário", use_container_width=True)
 
         if submit_button:
             if not all([nome, usuario, senha, numero]):
                 st.error("Todos os campos são obrigatórios!")
-            elif atualizacaousuarios(user[0], nome, usuario, senha, numero, permissao, nome_grupo, codigo_grupo):
+            elif atualizacaousuarios(user[0], nome, usuario, senha, numero, permissao, grupo_id):
                 st.session_state.mensagem = "Usuário atualizado com sucesso!"
                 st.session_state.editar_usuario = None
                 st.rerun()
@@ -369,8 +343,8 @@ def listarusuarios():
             col2.markdown(f"**Permissão:** `{user[5]}`")
             
             col1, col2 = st.columns(2)
-            col1.markdown(f"**Grupo:** `{user[6] if len(user) > 6 and user[6] else 'NULL'}`")
-            col2.markdown(f"**Código Grupo:** `{user[7] if len(user) > 7 and user[7] else 'NULL'}`")
+            col1.markdown(f"**Grupo ID:** `{user[6] if user[6] else 'NULL'}`")
+            col2.markdown(f"**Grupo:** `{user[7] if user[7] else 'NULL'}`")
             
             btn_col1, btn_col2 = st.columns(2)
             
@@ -422,6 +396,14 @@ def listargrupos():
             col1, col2 = st.columns(2)
             col1.markdown(f"**Código:** `{grupo[2] if len(grupo) > 2 and grupo[2] else 'N/A'}`")
             
+            conexao = conectarbanco()
+            if conexao:
+                cursor = conexao.cursor()
+                cursor.execute("SELECT COUNT(*) FROM usuarios WHERE grupo_id = %s", (grupo[0],))
+                count_usuarios = cursor.fetchone()[0]
+                conexao.close()
+                st.markdown(f"**Usuários associados:** `{count_usuarios}`")
+            
             btn_col1, btn_col2 = st.columns(2)
             
             if btn_col1.button("✏️ Editar", key=f"edit_grupo_{grupo[0]}", use_container_width=True):
@@ -439,6 +421,7 @@ def listargrupos():
             if ("confirmarexclusaogrupo" in st.session_state and 
                 st.session_state.confirmarexclusaogrupo == grupo[0]):
                 st.warning(f"Confirmar exclusão do grupo {st.session_state.grupo_a_excluir}?")
+                st.info("Os usuários associados a este grupo terão seu grupo definido como NULL.")
                 
                 confirm_col1, confirm_col2 = st.columns(2)
                 if confirm_col1.button("✅ Confirmar", key=f"sim_grupo_{grupo[0]}", use_container_width=True):
@@ -480,7 +463,6 @@ def pagina_usuarios():
     if st.session_state.get("novousuario", False):
         formularionovousuario()
     
-    # Mostrar opções de dashboard se o botão foi clicado
     if st.session_state.get("show_dashboard_options", False):
         st.subheader("Selecione o Dashboard")
         
@@ -504,11 +486,14 @@ def pagina_usuarios():
             col1, col2 = st.columns(2)
             if col1.button("Acessar Dashboard", use_container_width=True):
                 if codigo_dashboard:
-                    # Remove a extensão .py se existir e converte para lowercase
-                    nome_pagina = codigo_dashboard.replace('.py', '').lower().strip()
-                    st.session_state.page = nome_pagina
-                    st.session_state.show_dashboard_options = False
-                    st.rerun()
+                    try:
+                        # Configura para carregar o dashboard específico
+                        st.session_state.page = "dashboard"
+                        st.session_state.dashboard_page = f"pagina{codigo_dashboard.strip().lower()}"
+                        st.session_state.show_dashboard_options = False
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Erro ao configurar dashboard: {str(e)}")
                 else:
                     st.error("Este grupo não tem um código de dashboard associado")
             
