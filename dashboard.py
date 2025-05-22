@@ -1,3 +1,4 @@
+
 import numpy as np
 import streamlit as st
 import pandas as pd
@@ -10,7 +11,14 @@ from inspect import getmembers, isfunction
 from decimal import Decimal, ROUND_HALF_UP
 from datetime import datetime, timedelta
 
-lc.setlocale(lc.LC_ALL, 'pt_BR')
+try:
+    lc.setlocale(lc.LC_ALL, 'pt_BR.UTF-8')
+    def formatar_moeda(valor):
+        return lc.currency(valor, grouping=True, symbol=True)
+except lc.Error:
+    lc.setlocale(lc.LC_ALL, '')
+    def formatar_moeda(valor):
+        return f"R$ {valor:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
 
 def verificar_autenticacao():
     """Verifica se o usuário está autenticado"""
@@ -116,8 +124,9 @@ def paginaatos():
 
                 fig = go.Figure()
                 
-                texto_formatado = [f"R$ {lc.currency(v, grouping=True, symbol=False)}" for v in valores]
-                hover_texto = [f"{cat}<br>R$ {lc.currency(v, grouping=True, symbol=False)}" for cat, v in zip(categorias, valores)]
+                texto_formatado = [formatar_moeda(v) for v in valores]
+                hover_texto = [f"{cat}<br>{formatar_moeda(v)}" for cat, v in zip(categorias, valores)]
+
                 
                 fig.add_trace(go.Bar(
                 x=categorias,
@@ -164,9 +173,9 @@ def paginaatos():
                 valores = [percentual_crescimento_atual, percentual_crescimento_meta]
                 cores = ["green", "aqua"]
 
-                texto_formatado = [lc.format_string('%.2f', v, grouping=True) + "%" for v in valores]
-                hover_texto = [f"{cat}: {lc.format_string('%.2f', v, grouping=True)}%" for cat, v in zip(categorias, valores)]
-
+                texto_formatado = [f"{v:,.2f}%".replace(",", "X").replace(".", ",").replace("X", ".") for v in valores]
+                hover_texto = [f"{cat}: {v:,.2f}%".replace(",", "X").replace(".", ",").replace("X", ".") for cat, v in zip(categorias, valores)]
+                
                 fig.add_trace(go.Bar(
                     x=categorias,
                     y=valores,
@@ -221,7 +230,8 @@ def paginaatos():
                 })
 
                 df_vendas["Dia"] = df_vendas["Data"].dt.day 
-                df_vendas["Valor_formatado"] = df_vendas["Valor"].apply(lambda x: lc.currency(x, grouping=True))
+                df_vendas["Valor_formatado"] = df_vendas["Valor"].apply(lambda x: f"R$ {x:,.2f}".replace(",", "X").replace(".", ",").replace("X", "."))
+
 
                 fig = go.Figure()
 
@@ -260,7 +270,7 @@ def paginaatos():
 
                 fig = go.Figure()
 
-                df_vendas["Valor_formatado"] = df_vendas["Vendas"].apply(lambda y: lc.currency(y, grouping=True))
+                df_vendas["Valor_formatado"] = df_vendas["Vendas"].apply(formatar_moeda)
 
                 fig.add_trace(go.Scatter(
                     x=df_vendas["Mês"].dt.strftime('%m/%Y'),
@@ -325,15 +335,15 @@ def paginaatos():
 
             with col1:
                 st.write(f"""#### Vendas 2024: \n 
-                        R$ {lc.currency(total_vendas, grouping=True, symbol=False)}
+                        {formatar_moeda(total_vendas)}
                         """)
             with col2:
                 st.write(f"""#### Acumulado 2024: \n
-                        R$ {lc.currency(acumulo_vendas_ano_anterior, grouping=True, symbol=False)}
+                        {formatar_moeda(acumulo_vendas_ano_anterior)}
                         """)
             with col3:
                 st.write(f"""#### Vendas do dia: ({data_venda_dia.strftime('%d/%m/%Y') if data_venda_dia else 'Sem data'})\n
-                        R$ {lc.currency(vendas_dia_anterior, grouping=True, symbol=False)} """)
+                        {formatar_moeda(vendas_dia_anterior)} """)
 
             exibindo_grafico_de_barras = grafico_de_barras(meta_mes, previsao, acumulo_meta_ano_anterior, acumulo_de_vendas)
             st.plotly_chart(exibindo_grafico_de_barras, use_container_width=True)
@@ -354,9 +364,7 @@ def paginaatos():
                 lambda f: max(float(consultaSQL.obter_acumulo_de_vendas(f) or 0), 1)
             )
 
-            dados_vendas["vendas_formatado"] = dados_vendas["vendas"].apply(
-                lambda v: f"R$ {lc.format_string('%.2f', v, grouping=True)}"
-            )
+            dados_vendas["vendas_formatado"] = dados_vendas["vendas"].apply(formatar_moeda)
 
             fig_mapa = px.scatter_mapbox(
                 dados_vendas,
@@ -381,7 +389,7 @@ def paginaatos():
                 coloraxis_colorbar=dict(
                     title="Vendas (R$)",
                     tickvals=np.linspace(dados_vendas["vendas"].min(), dados_vendas["vendas"].max(), 5),
-                    ticktext=[f"R$ {lc.format_string('%.2f', v, grouping=True)}" for v in np.linspace(dados_vendas["vendas"].min(), dados_vendas["vendas"].max(), 5)]
+                    ticktext=[formatar_moeda(v) for v in np.linspace(dados_vendas["vendas"].min(), dados_vendas["vendas"].max(), 5)]
                 )
             )
 
@@ -506,7 +514,7 @@ def paginaatos():
                 categorias = ["Vendas ano anterior", "Meta do mês", f"Vendas de {mes_selecionado}"]
                 valores = [vendas_ano, meta_mes, vendas_mes_atual]
                 cores = ["darkgray", "darkblue", "darkred"]
-                textos_formatados = [f'R$ {lc.currency(v, grouping=True, symbol=False)}' for v in valores]
+                textos_formatados = [f'R$ {v:,.2f}'.replace(",", "X").replace(".", ",").replace("X", ".") for v in valores]
 
                 fig = go.Figure()
 
@@ -612,7 +620,7 @@ def paginaatos():
                 })
 
                 df_vendas["Dia"] = df_vendas["Data"].dt.day 
-                df_vendas["Valor_formatado"] = df_vendas["Valor"].apply(lambda x: lc.currency(x, grouping=True))
+                df_vendas["Valor_formatado"] = df_vendas["Valor"].apply(lambda x: f"R$ {x:,.2f}".replace(",", "X").replace(".", ",").replace("X", "."))
                 df_vendas["MesAno"] = df_vendas["Mês"] + "/" + df_vendas["Ano"]
 
                 fig = go.Figure()
@@ -651,7 +659,7 @@ def paginaatos():
 
                 fig = go.Figure()
 
-                df_vendas["Valor_formatado"] = df_vendas["Vendas"].apply(lambda y: lc.currency(y, grouping=True))
+                df_vendas["Valor_formatado"] = df_vendas["Vendas"].apply(lambda y: f"R$ {y:,.2f}".replace(",", "X").replace(".", ",").replace("X", "."))
 
                 fig.add_trace(go.Scatter(
                     x=df_vendas["Mês"].dt.strftime('%m/%Y'),
@@ -698,7 +706,6 @@ def paginaatos():
 
         pagina_meses_anterior()
 
-    # Botão sair da conta (movido para depois das funções de página)
     if st.sidebar.button("🚪 Sair"):
         st.session_state.authenticated = False
         st.session_state.page = None
